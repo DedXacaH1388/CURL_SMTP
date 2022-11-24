@@ -1,0 +1,8 @@
+{
+  "encoding" : "UTF-8",
+  "mailFrom" : "",
+  "mailAddress" : "",
+  "smtpAddress" : "smtp.google.com",
+  "decrPass" : "asdfasdf",
+  "encrPass" : 0
+}
