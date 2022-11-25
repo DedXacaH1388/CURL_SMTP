@@ -344,9 +344,7 @@ int main(int argc, char** argv) {
     } else if ((argv[1] == (std::string)"-f") && (argv[3] == (std::string)"-m")) {
         checkFirstLaunch();
         curlSend(argv[2], argv[4]);
-    } else {
-        checkFirstLaunch();
+    } else 
         curlSend(argv[1], argv[2], argv[3], argv[4]);
-    }
     return 0;
 }
