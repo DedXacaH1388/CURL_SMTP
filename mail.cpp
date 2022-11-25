@@ -192,6 +192,75 @@ size_t read_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
     return retcode;
 }
 
+const char* serialize_to_char(json::value tmp) {
+    const char* tmp1;
+    std::string tmp2 = json::serialize(tmp);
+    tmp2.pop_back();
+    tmp2.erase(0, 1);
+    tmp1 = tmp2.c_str();
+    return tmp1;
+}
+
+int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, const char* smtpURL) {
+    FILE *ftu = fopen(fileToSend, "rb");
+
+    CURL *curl;
+    CURLcode res = CURLE_OK;
+    struct stat file_info;
+    curl_off_t speed_upload, total_time;
+    struct curl_slist *recipients = NULL;
+    struct uploadStatus uploadCtx = { 0 };
+
+    const char* currentDate = getCurrentDate();
+
+    sprintf(payloadText, 
+            "Date: %s\r\n"
+            "To: %s\r\n"
+            "From: %s\r\n"
+            "Subject: SMTP Request test.\r\n"
+            "\r\n"
+            "Test mail.\r\n",
+            currentDate, mailTo, mailFrom);
+
+    if (!ftu) 
+        return 1;
+    if (fstat(fileno(ftu), &file_info)) 
+        return 1;
+    
+    curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, smtpURL);
+        curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_callback);
+        curl_easy_setopt(curl, CURLOPT_READDATA, ftu);
+        curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)file_info.st_size);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+        curl_easy_setopt(curl, CURLOPT_MAIL_FROM, mailFrom);
+        recipients = curl_slist_append(recipients, mailTo);
+        curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
+        
+        res = curl_easy_perform(curl);
+        
+        if (res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", 
+                    curl_easy_strerror(res));
+        } else {
+            curl_easy_getinfo(curl, CURLINFO_SPEED_UPLOAD_T, &speed_upload);
+            curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME_T, &total_time);
+            
+            fprintf(stderr, "Speed: %lu bytes/sec during %lu.%06lu seconds\n", 
+                    (unsigned long)speed_upload,
+                    (unsigned long)(total_time / 1000000),
+                    (unsigned long)(total_time % 1000000));
+        }
+        curl_slist_free_all(recipients);
+        curl_easy_cleanup(curl);
+    }
+
+    delete [] ftu;
+    return (int)res;
+}
+
 int curlSend(const char* fileToSend, const char* mailTo) {
     //vars for work with files
     FILE *ftu = fopen(fileToSend, "rb");
@@ -212,14 +281,8 @@ int curlSend(const char* fileToSend, const char* mailTo) {
     //parsing json
     root = fileParsing("./mail.json");
     
-    std::string mf = json::serialize(root.at("mailAddress"));
-    mf.pop_back();
-    mf.erase(0,1);
-    mailFrom = (char*)mf.c_str();
-    std::string sURL = json::serialize(root.at("smtpAddress"));
-    sURL.pop_back();
-    sURL.erase(0,1);
-    smtpURL = (char*)sURL.c_str();
+    mailTo = (char*)serialize_to_char(root.at("mailAddress"));
+    smtpURL = (char*)serialize_to_char(root.at("smtpAddress"));
 
     sprintf(payloadText, 
         "Date: %s\r\n"
@@ -265,7 +328,8 @@ int curlSend(const char* fileToSend, const char* mailTo) {
         curl_slist_free_all(recipients);
         curl_easy_cleanup(curl);
     }
-
+    
+    delete [] ftu;
     return (int)res;
 }
 
@@ -277,11 +341,12 @@ int main(int argc, char** argv) {
             "       mail path\\to\\file mail@example.org\r\n"
             "Help:\r\n"
             "-h       --help                    Show this message, and exit.\r\n");
-        return 0;
+    } else if ((argv[1] == (std::string)"-f") && (argv[3] == (std::string)"-m")) {
+        checkFirstLaunch();
+        curlSend(argv[2], argv[4]);
     } else {
         checkFirstLaunch();
-        curlSend(argv[1], argv[2]);
-        return 0;
+        curlSend(argv[1], argv[2], argv[3], argv[4]);
     }
     return 0;
 }
