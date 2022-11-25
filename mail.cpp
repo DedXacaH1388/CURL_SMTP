@@ -2,44 +2,57 @@
 #include <boost/json/serialize.hpp>
 #include <boost/json/stream_parser.hpp>
 #include <boost/json/system_error.hpp>
-#include <ctime>
+#include <boost/json/src.hpp>
+
 #include <curl/curl.h>
 #include <curl/easy.h>
+
 #include <iostream>
 #include <fstream>
 #include <stdio.h>
 #include <string>
-#include <curlpp/cURLpp.hpp>
+#include <iomanip>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <ctime>
+
 #include <crypto++/aes.h>
 #include <crypto++/modes.h>
 #include <crypto++/filters.h>
 #include <crypto++/base64.h>
-#include <boost/json/src.hpp>
-#include <fcntl.h>
-#include <sys/stat.h>
 
 namespace json = boost::json;
+using std::vector;
+using std::string;
 
 static char* mailTo;
 static char* mailFrom;
 static char* smtpURL;
 static char* payloadText;
 
-std::string encrypt(const std::string&, const std::vector<uint8_t>&, const std::vector<uint8_t>);
-std::string decrypt(const std::string&, const std::vector<uint8_t>&, const std::vector<uint8_t>);
+string encrypt(const string&, const vector<uint8_t>&, const vector<uint8_t>);
+string decrypt(const string&, const vector<uint8_t>&, const vector<uint8_t>);
 json::value fileParsing(const char*);
 void writeToFile(const char*, json::value);
 void checkFirstLaunch();
 const char* getCurrentDate();
 static size_t payloadSource(char*, size_t, size_t, void*);
 
+struct Option {
+    string option;
+    string alternative;
+    string message;
+    string value;
+};
+
 struct uploadStatus {
     size_t bytesRead;
 };
 
 //encryption function
-std::string encrypt(const std::string& input, const std::vector<uint8_t>& key, const std::vector<uint8_t> iv) {
-    std::string cipher;
+string encrypt(const string& input, const vector<uint8_t>& key, const vector<uint8_t> iv) {
+    string cipher;
 
     auto aes = CryptoPP::AES::Encryption(key.data(), CryptoPP::AES::DEFAULT_KEYLENGTH);
     auto aes_cbc = CryptoPP::CBC_Mode_ExternalCipher::Encryption(aes, iv.data());
@@ -59,8 +72,8 @@ std::string encrypt(const std::string& input, const std::vector<uint8_t>& key, c
 }
 
 //decryption function
-std::string decrypt(const std::string& cipher, const std::vector<uint8_t>& key, const std::vector<uint8_t> iv) {
-    std::string plain_text;
+string decrypt(const string& cipher, const vector<uint8_t>& key, const vector<uint8_t> iv) {
+    string plain_text;
 
     auto aes = CryptoPP::AES::Decryption(key.data(), CryptoPP::AES::DEFAULT_KEYLENGTH);
     auto aes_cbc = CryptoPP::CBC_Mode_ExternalCipher::Decryption(aes, iv.data());
@@ -105,7 +118,7 @@ json::value fileParsing(const char* filename) {
 void writeToFile(const char* filename, json::value tmp) {
     std::ofstream fs(filename, std::ofstream::out);
     const char* buf;
-    std::string buff;
+    string buff;
 
     buff = json::serialize(tmp);
     buf = buff.data();
@@ -127,10 +140,10 @@ void checkFirstLaunch() {
     if (root.at("encrPass") == 0) {
         //vars for encr/decr
         static constexpr size_t AES_KEY_SIZE = 256 / 8;  
-        std::vector<uint8_t> key(AES_KEY_SIZE);
-        std::vector<uint8_t> iv(CryptoPP::AES::BLOCKSIZE);
-        std::string decrPass;
-        std::string encrPass;
+        vector<uint8_t> key(AES_KEY_SIZE);
+        vector<uint8_t> iv(CryptoPP::AES::BLOCKSIZE);
+        string decrPass;
+        string encrPass;
 
         decrPass = json::serialize(root.at("decrPass"));
         decrPass.pop_back();
@@ -149,7 +162,7 @@ const char* getCurrentDate() {
     struct tm ts;
     char *buf;
     ts = *localtime(&now);
-    std::strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &ts);
+    std::strftime(buf, sizeof(ts), "%Y-%m-%d.%X", &ts);
     
     return buf;
 }
@@ -194,7 +207,7 @@ size_t read_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
 
 const char* serialize_to_char(json::value tmp) {
     const char* tmp1;
-    std::string tmp2 = json::serialize(tmp);
+    string tmp2 = json::serialize(tmp);
     tmp2.pop_back();
     tmp2.erase(0, 1);
     tmp1 = tmp2.c_str();
@@ -220,7 +233,7 @@ int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, c
             "Subject: SMTP Request test.\r\n"
             "\r\n"
             "Test mail.\r\n",
-            currentDate, mailTo, mailFrom);
+            *currentDate, *mailTo, *mailFrom);
 
     if (!ftu) 
         return 1;
@@ -333,18 +346,88 @@ int curlSend(const char* fileToSend, const char* mailTo) {
     return (int)res;
 }
 
-//main function
-int main(int argc, char** argv) {
-    if ((argv[1] == (std::string)"--help") || (argv[1] == (std::string)"-h")) {
-        printf(
-            "Using:\r\n"
-            "       mail path\\to\\file mail@example.org\r\n"
-            "Help:\r\n"
-            "-h       --help                    Show this message, and exit.\r\n");
-    } else if ((argv[1] == (std::string)"-f") && (argv[3] == (std::string)"-m")) {
-        checkFirstLaunch();
-        curlSend(argv[2], argv[4]);
-    } else 
-        curlSend(argv[1], argv[2], argv[3], argv[4]);
-    return 0;
+/**
+ * @brief Shows help message
+ * 
+ * @param options available options
+ */
+void help_message(const vector<Option> &options) {
+    std::cout << "Usage: " << std::endl
+        << "\tmail -f path\\to\\file -mt mail@example.com" << std::endl
+        << "Options: " << std::endl; 
+
+    for(vector<Option>::const_iterator i = options.begin(); i != options.end(); i++) {
+        string res = "\033[33m" + i->option;
+        if (!i->alternative.empty()) {
+            res += " | " + i->alternative;
+        }
+        res += "\033[0m";
+        if (!i->value.empty()) {
+            res += " <" + i->value + ">";
+        }
+        std::cout << "\t" << std::left << std::setw(30) << res << i->message << std::endl;
+    }
 }
+
+/**
+ * @brief Finds option in the list of options
+ * 
+ * @param args arguments
+ * @param option option
+ * @return empty string if not found, "true" or <value> if found
+ */
+string find_args(const vector<string> &args, Option option) {
+    for (vector<string>::const_iterator i = args.begin(); i != args.end(); i++) {
+        if ((*i).compare(option.option) == 0 || (*i).compare(option.alternative)) {
+            if (!option.value.empty()) {
+                if (i + 1 == args.end()) {
+                    std::cout << "\033[31m" << "Value for option '" << option.option << "' was not provided!" << std::endl;
+                    exit(1);
+                } else {
+                    return *(i + 1);
+                }
+            } else {
+                return "true";
+            }
+        }
+    }
+    return "";
+}
+
+
+int main(int argc, char** argv) {
+    vector<Option> options = {
+        {"-h",  "--help",       "Get help message",         ""},
+        {"-mt", "--mailto",     "Set mail to send to",      "string"},
+        {"-f",  "--file",       "Set file name",            "string"},
+        {"-mf", "--mailfrom",   "Set mail to send from",    "string"},
+        {"-s",  "--smtp",       "Set smtp server url",      "string"}
+    };
+
+    vector<string> args(argv, argv + argc);
+    if (args.size() < 2 || !find_args(args, options[0]).empty() || !find_args(args, options[1]).empty()) {
+        help_message(options);
+        return EXIT_FAILURE;
+    }
+    string result = find_args(args, options[2]);
+    if (!result.empty()) {
+        std::cout << "\033[31mNOT IMPLEMENTED | Value: " << result << "\033[0m" << std::endl;
+    }
+    return EXIT_SUCCESS;
+}
+
+//main function
+// int main(int argc, string* argb) {
+//     if ((argb[1].compare("--help") == 0) || (argb[1].compare("-h") == 0)) {
+//         printf(
+//             "Using:\r\n"
+//             "       mail path\\to\\file mail@example.org\r\n"
+//             "Help:\r\n"
+//             "-h       --help                    Show this message, and exit.\r\n");
+//     } else if ((argb[1].compare("-f") == 0) && (argb[3].compare("-m") == 0)) {
+//         checkFirstLaunch();
+//         curlSend(argb[2].c_str(), argb[4].c_str());
+//     } else 
+//         curlSend("./mail.json", "xhufow@mailto.plus", "post@molodechnovodokanal.by", "smtp.molodechnovodokanal.by");
+//     return 0;
+// }
