@@ -51,7 +51,14 @@ struct uploadStatus {
     size_t bytesRead;
 };
 
-//encryption function
+/**
+ * @brief Function to encrypt password
+ * 
+ * @param input decrypted password
+ * @param key key to encrypt
+ * @param iv ???
+ * @return encrypted password
+ */
 string encrypt(const string& input, const vector<uint8_t>& key, const vector<uint8_t> iv) {
     string cipher;
 
@@ -72,7 +79,14 @@ string encrypt(const string& input, const vector<uint8_t>& key, const vector<uin
     return cipher;
 }
 
-//decryption function
+/**
+ * @brief Function to decrypt password
+ * 
+ * @param cipher encrypted password
+ * @param key key to decrypt
+ * @param iv ???
+ * @return decrypted password
+ */
 string decrypt(const string& cipher, const vector<uint8_t>& key, const vector<uint8_t> iv) {
     string plain_text;
 
@@ -93,6 +107,12 @@ string decrypt(const string& cipher, const vector<uint8_t>& key, const vector<ui
     return plain_text;
 }
 
+/**
+ * @brief Parse json file
+ * 
+ * @param filename path to file to parse
+ * @return parsed data from json file
+ */
 json::value fileParsing(const char* filename) {
     std::ifstream is(filename, std::ifstream::binary);
     
@@ -114,7 +134,12 @@ json::value fileParsing(const char* filename) {
     return tmp;
 }
 
-//function to write to json
+/**
+ * @brief Write changes to json file (for example crypted pass)
+ * 
+ * @param filename name of file to write
+ * @param tmp boost::json::value to write to file
+ */
 void writeToFile(const char* filename, json::value tmp) {
     std::ofstream fs(filename, std::ofstream::out);
     const char* buf;
@@ -131,13 +156,15 @@ void writeToFile(const char* filename, json::value tmp) {
     delete[] buf;
 }
 
-//function to check pass encryptin in json
+/**
+ * @brief Check password encryption in json file
+ */
 void checkFirstLaunch() {
     json::value root;
     root = fileParsing("./mail.json");
 
     //check for first launch, if no, then encrypt pass and write it to file
-    if (root.at("encrPass") == 0) {
+    if ((root.at("encrPass") == 0) || (root.at("encrPass") == "")) {
         //vars for encr/decr
         static constexpr size_t AES_KEY_SIZE = 256 / 8;  
         vector<uint8_t> key(AES_KEY_SIZE);
@@ -156,7 +183,11 @@ void checkFirstLaunch() {
     }
 }
 
-//function to return current date
+/**
+ * @brief Get the Current Date object
+ * 
+ * @return date in char array type
+ */
 const char* getCurrentDate() {
     time_t now = time(0);
     struct tm ts;
@@ -205,6 +236,12 @@ size_t read_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
     return retcode;
 }
 
+/**
+ * @brief Parse boost::json to char*
+ * 
+ * @param tmp json value to parse (root.at("..."))
+ * @return parsed value
+ */
 const char* serialize_to_char(json::value tmp) {
     const char* tmp1;
     string tmp2 = json::serialize(tmp);
@@ -214,6 +251,15 @@ const char* serialize_to_char(json::value tmp) {
     return tmp1;
 }
 
+/**
+ * @brief Send mail only with args
+ * 
+ * @param fileToSend file to send with mail
+ * @param mailTo address to mail to
+ * @param mailFrom address to mail from
+ * @param smtpURL smtp URL address
+ * @return CURL answer
+ */
 int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, const char* smtpURL) {
     FILE *ftu = fopen(fileToSend, "r");
 
@@ -267,6 +313,13 @@ int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, c
     return (int)res;
 }
 
+/**
+ * @brief Send mail with json file
+ * 
+ * @param fileToSend file to send with mail
+ * @param mailTo address to mail to
+ * @return CURL answer
+ */
 int curlSend(const char* fileToSend, const char* mailTo) {
     //vars for work with files
     FILE *ftu = fopen(fileToSend, "rb");
