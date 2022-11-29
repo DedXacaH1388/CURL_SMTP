@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <ctime>
+#include <format>
 
 #include <crypto++/aes.h>
 #include <crypto++/modes.h>
@@ -29,7 +30,7 @@ using std::string;
 static char* mailTo;
 static char* mailFrom;
 static char* smtpURL;
-static char* payloadText;
+static string payloadText;
 
 string encrypt(const string&, const vector<uint8_t>&, const vector<uint8_t>);
 string decrypt(const string&, const vector<uint8_t>&, const vector<uint8_t>);
@@ -50,7 +51,14 @@ struct uploadStatus {
     size_t bytesRead;
 };
 
-//encryption function
+/**
+ * @brief Function to encrypt password
+ * 
+ * @param input decrypted password
+ * @param key key to encrypt
+ * @param iv ???
+ * @return encrypted password
+ */
 string encrypt(const string& input, const vector<uint8_t>& key, const vector<uint8_t> iv) {
     string cipher;
 
@@ -71,7 +79,14 @@ string encrypt(const string& input, const vector<uint8_t>& key, const vector<uin
     return cipher;
 }
 
-//decryption function
+/**
+ * @brief Function to decrypt password
+ * 
+ * @param cipher encrypted password
+ * @param key key to decrypt
+ * @param iv ???
+ * @return decrypted password
+ */
 string decrypt(const string& cipher, const vector<uint8_t>& key, const vector<uint8_t> iv) {
     string plain_text;
 
@@ -92,7 +107,12 @@ string decrypt(const string& cipher, const vector<uint8_t>& key, const vector<ui
     return plain_text;
 }
 
-//function to parse from json
+/**
+ * @brief Parse json file
+ * 
+ * @param filename path to file to parse
+ * @return parsed data from json file
+ */
 json::value fileParsing(const char* filename) {
     std::ifstream is(filename, std::ifstream::binary);
     
@@ -114,7 +134,12 @@ json::value fileParsing(const char* filename) {
     return tmp;
 }
 
-//function to write to json
+/**
+ * @brief Write changes to json file (for example crypted pass)
+ * 
+ * @param filename name of file to write
+ * @param tmp boost::json::value to write to file
+ */
 void writeToFile(const char* filename, json::value tmp) {
     std::ofstream fs(filename, std::ofstream::out);
     const char* buf;
@@ -131,13 +156,15 @@ void writeToFile(const char* filename, json::value tmp) {
     delete[] buf;
 }
 
-//function to check pass encryptin in json
+/**
+ * @brief Check password encryption in json file
+ */
 void checkFirstLaunch() {
     json::value root;
     root = fileParsing("./mail.json");
 
     //check for first launch, if no, then encrypt pass and write it to file
-    if (root.at("encrPass") == 0) {
+    if ((root.at("encrPass") == 0) || (root.at("encrPass") == "")) {
         //vars for encr/decr
         static constexpr size_t AES_KEY_SIZE = 256 / 8;  
         vector<uint8_t> key(AES_KEY_SIZE);
@@ -156,7 +183,11 @@ void checkFirstLaunch() {
     }
 }
 
-//function to return current date
+/**
+ * @brief Get the Current Date object
+ * 
+ * @return date in char array type
+ */
 const char* getCurrentDate() {
     time_t now = time(0);
     struct tm ts;
@@ -205,6 +236,12 @@ size_t read_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
     return retcode;
 }
 
+/**
+ * @brief Parse boost::json to char*
+ * 
+ * @param tmp json value to parse (root.at("..."))
+ * @return parsed value
+ */
 const char* serialize_to_char(json::value tmp) {
     const char* tmp1;
     string tmp2 = json::serialize(tmp);
@@ -214,8 +251,17 @@ const char* serialize_to_char(json::value tmp) {
     return tmp1;
 }
 
+/**
+ * @brief Send mail only with args
+ * 
+ * @param fileToSend file to send with mail
+ * @param mailTo address to mail to
+ * @param mailFrom address to mail from
+ * @param smtpURL smtp URL address
+ * @return CURL answer
+ */
 int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, const char* smtpURL) {
-    FILE *ftu = fopen(fileToSend, "rb");
+    FILE *ftu = fopen(fileToSend, "r");
 
     CURL *curl;
     CURLcode res = CURLE_OK;
@@ -226,15 +272,8 @@ int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, c
 
     const char* currentDate = getCurrentDate();
 
-    sprintf(payloadText, 
-            "Date: %s\r\n"
-            "To: %s\r\n"
-            "From: %s\r\n"
-            "Subject: SMTP Request test.\r\n"
-            "\r\n"
-            "Test mail.\r\n",
-            *currentDate, *mailTo, *mailFrom);
-
+    payloadText = std::format("Date: {}\r\nTo: {}\r\nFrom: {}\r\nSubject: {}\r\n\r\n{}\r\n", 
+        currentDate, mailTo, mailFrom, "test", "test");
     if (!ftu) 
         return 1;
     if (fstat(fileno(ftu), &file_info)) 
@@ -274,6 +313,13 @@ int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, c
     return (int)res;
 }
 
+/**
+ * @brief Send mail with json file
+ * 
+ * @param fileToSend file to send with mail
+ * @param mailTo address to mail to
+ * @return CURL answer
+ */
 int curlSend(const char* fileToSend, const char* mailTo) {
     //vars for work with files
     FILE *ftu = fopen(fileToSend, "rb");
@@ -297,14 +343,8 @@ int curlSend(const char* fileToSend, const char* mailTo) {
     mailTo = (char*)serialize_to_char(root.at("mailAddress"));
     smtpURL = (char*)serialize_to_char(root.at("smtpAddress"));
 
-    sprintf(payloadText, 
-        "Date: %s\r\n"
-        "To: %s\r\n"
-        "From: %s\r\n"
-        "Subject: SMTP Request test.\r\n"
-        "\r\n"
-        "Test mail.\r\n",
-        currentDate, mailTo, mailFrom);
+    payloadText = std::format("Date: {}\r\nTo: {}\r\nFrom: {}\r\nSubject: {}\r\n\r\n{}\r\n", 
+        currentDate, mailTo, mailFrom, "test", "test");
     
     if (!ftu)
         return 1;
@@ -353,19 +393,22 @@ int curlSend(const char* fileToSend, const char* mailTo) {
  */
 void help_message(const vector<Option> &options) {
     std::cout << "Usage: " << std::endl
-        << "\tmail -f path\\to\\file -mt mail@example.com" << std::endl
+        << "\tmail \033[33m-f \033[34mpath/to/file.txt \033[33m-mt \033[34mmail@example.com\033[0m" << std::endl
         << "Options: " << std::endl; 
 
     for(vector<Option>::const_iterator i = options.begin(); i != options.end(); i++) {
-        string res = "\033[33m" + i->option;
+        std::cout << "\t" << "\033[33m" << std::left << std::setw(4) << i->option << "\033[0m";
         if (!i->alternative.empty()) {
-            res += " | " + i->alternative;
-        }
-        res += "\033[0m";
+            std::cout << "| " << "\033[33m" << std::left << std::setw(12) <<  i->alternative << "\033[0m";
+        } else {
+      std::cout << std::setw(14) << " ";
+    }
         if (!i->value.empty()) {
-            res += " <" + i->value + ">";
-        }
-        std::cout << "\t" << std::left << std::setw(30) << res << i->message << std::endl;
+            std::cout << "\033[34m" << std::left << std::setw(15)  << " <" + i->value + ">" << "\033[0m";
+        } else {
+      std::cout << std::setw(15) << " ";
+    }
+        std::cout << "-- " << i->message << std::endl;
     }
 }
 
@@ -394,7 +437,6 @@ string find_args(const vector<string> &args, Option option) {
     return "";
 }
 
-
 int main(int argc, char** argv) {
     vector<Option> options = {
         {"-h",  "--help",       "Get help message",         ""},
@@ -405,29 +447,14 @@ int main(int argc, char** argv) {
     };
 
     vector<string> args(argv, argv + argc);
-    if (args.size() < 2 || !find_args(args, options[0]).empty() || !find_args(args, options[1]).empty()) {
-        help_message(options);
-        return EXIT_FAILURE;
-    }
-    string result = find_args(args, options[2]);
-    if (!result.empty()) {
-        std::cout << "\033[31mNOT IMPLEMENTED | Value: " << result << "\033[0m" << std::endl;
-    }
+    // if (args.size() < 2 || !find_args(args, options[0]).empty()) {
+    //     help_message(options);
+    //     return EXIT_FAILURE;
+    // }
+    // string result = find_args(args, options[2]);
+    // if (!result.empty()) {
+    //     std::cout << "\033[31mNOT IMPLEMENTED | Value: " << result << "\033[0m" << std::endl;
+    // }
+    curlSend("./mail.json", "", "", "");
     return EXIT_SUCCESS;
 }
-
-//main function
-// int main(int argc, string* argb) {
-//     if ((argb[1].compare("--help") == 0) || (argb[1].compare("-h") == 0)) {
-//         printf(
-//             "Using:\r\n"
-//             "       mail path\\to\\file mail@example.org\r\n"
-//             "Help:\r\n"
-//             "-h       --help                    Show this message, and exit.\r\n");
-//     } else if ((argb[1].compare("-f") == 0) && (argb[3].compare("-m") == 0)) {
-//         checkFirstLaunch();
-//         curlSend(argb[2].c_str(), argb[4].c_str());
-//     } else 
-//         curlSend("./mail.json", "xhufow@mailto.plus", "post@molodechnovodokanal.by", "smtp.molodechnovodokanal.by");
-//     return 0;
-// }
