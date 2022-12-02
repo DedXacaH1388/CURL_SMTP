@@ -16,7 +16,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <ctime>
-#include <format>
+
+#include <fmt/format.h>
 
 #include <crypto++/aes.h>
 #include <crypto++/modes.h>
@@ -30,7 +31,8 @@ using std::string;
 static char* mailTo;
 static char* mailFrom;
 static char* smtpURL;
-static string payloadText;
+static string headers_text[];
+static string inline_text[];
 
 string encrypt(const string&, const vector<uint8_t>&, const vector<uint8_t>);
 string decrypt(const string&, const vector<uint8_t>&, const vector<uint8_t>);
@@ -191,36 +193,14 @@ void checkFirstLaunch() {
 const char* getCurrentDate() {
     time_t now = time(0);
     struct tm ts;
-    char *buf;
+    char *buf = new char;
     ts = *localtime(&now);
     std::strftime(buf, sizeof(ts), "%Y-%m-%d.%X", &ts);
     
     return buf;
 }
 
-static size_t payloadSource(char *ptr, size_t size, size_t nmemb, void *userp) {
-    struct uploadStatus *uploadCtx = (struct uploadStatus *)userp;
-    const char *data;
-
-    size_t room = size * nmemb;
-       if ((size == 0) || (nmemb = 0) || (size * nmemb < 1)) 
-          return 1;
-    data = &payloadText[uploadCtx->bytesRead];
-
-    if (data) {
-        size_t len = strlen(data);
-        if (room < len)
-            len = room;
-        memcpy(ptr, data, len);
-        uploadCtx->bytesRead += len;
-
-        return len;
-    }
-
-    return 0;
-}
-
-size_t read_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
+size_t readCallback(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     FILE *readhere = (FILE *)userdata;
     curl_off_t nread;
@@ -260,20 +240,22 @@ const char* serialize_to_char(json::value tmp) {
  * @param smtpURL smtp URL address
  * @return CURL answer
  */
-int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, const char* smtpURL) {
-    FILE *ftu = fopen(fileToSend, "r");
+int curlSend(const char* file_to_send, const char* mail_to, const char* mail_from, const char* smtp_url, const char* pass) {
+    FILE *ftu = fopen(file_to_send, "r");
 
     CURL *curl;
     CURLcode res = CURLE_OK;
     struct stat file_info;
     curl_off_t speed_upload, total_time;
     struct curl_slist *recipients = NULL;
-    struct uploadStatus uploadCtx = { 0 };
 
-    const char* currentDate = getCurrentDate();
+    const char* current_date = getCurrentDate();
 
-    payloadText = std::format("Date: {}\r\nTo: {}\r\nFrom: {}\r\nSubject: {}\r\n\r\n{}\r\n", 
-        currentDate, mailTo, mailFrom, "test", "test");
+    headers_text[0] = fmt::format("Date: {}", current_date);
+    headers_text[1] = fmt::format("To: {}", mail_to);
+    headers_text[2] = fmt::format("From: ", mail_from);
+    headers_text[3] = fmt::format("Subject: {}", "test");
+    
     if (!ftu) 
         return 1;
     if (fstat(fileno(ftu), &file_info)) 
@@ -281,14 +263,21 @@ int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, c
     
     curl = curl_easy_init();
     if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, smtpURL);
-        curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
-        curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_callback);
-        curl_easy_setopt(curl, CURLOPT_READDATA, ftu);
-        curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)file_info.st_size);
+        curl_easy_setopt(curl, CURLOPT_URL, smtp_url);
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-        curl_easy_setopt(curl, CURLOPT_MAIL_FROM, mailFrom);
-        recipients = curl_slist_append(recipients, mailTo);
+
+        curl_easy_setopt(curl, CURLOPT_USERNAME, mail_from);
+        curl_easy_setopt(curl, CURLOPT_PASSWORD, pass);
+        curl_easy_setopt(curl, CURLOPT_LOGIN_OPTIONS, "AUTH=PLAIN");
+        curl_easy_setopt(curl, CURLOPT_MAIL_FROM, mail_from);
+
+        curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, readCallback);
+        curl_easy_setopt(curl, CURLOPT_READDATA, ftu);
+        curl_easy_setopt(curl, CURLOPT_FILE, ftu);
+        curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)file_info.st_size);
+
+        recipients = curl_slist_append(recipients, mail_to);
         curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
         
         res = curl_easy_perform(curl);
@@ -320,7 +309,7 @@ int curlSend(const char* fileToSend, const char* mailTo, const char* mailFrom, c
  * @param mailTo address to mail to
  * @return CURL answer
  */
-int curlSend(const char* fileToSend, const char* mailTo) {
+int curlSend(const char* fileToSend, const char* tmp) {
     //vars for work with files
     FILE *ftu = fopen(fileToSend, "rb");
 
@@ -330,7 +319,7 @@ int curlSend(const char* fileToSend, const char* mailTo) {
     struct stat file_info;
     curl_off_t speed_upload, total_time;
     struct curl_slist *recipients = NULL;
-    struct uploadStatus uploadCtx = { 0 };
+    mailTo = (char*)tmp;
 
     const char *currentDate = getCurrentDate();
     
@@ -340,11 +329,11 @@ int curlSend(const char* fileToSend, const char* mailTo) {
     //parsing json
     root = fileParsing("./mail.json");
     
-    mailTo = (char*)serialize_to_char(root.at("mailAddress"));
+    mailFrom = (char*)serialize_to_char(root.at("mailAddress"));
     smtpURL = (char*)serialize_to_char(root.at("smtpAddress"));
 
-    payloadText = std::format("Date: {}\r\nTo: {}\r\nFrom: {}\r\nSubject: {}\r\n\r\n{}\r\n", 
-        currentDate, mailTo, mailFrom, "test", "test");
+    //payloadText = fmt::format("Date: {}\r\nTo: {}\r\nFrom: {}\r\nSubject: {}\r\n\r\n{}\r\n", 
+    //    currentDate, mailTo, mailFrom, "test", "test");
     
     if (!ftu)
         return 1;
@@ -355,7 +344,7 @@ int curlSend(const char* fileToSend, const char* mailTo) {
     if (curl) {
         curl_easy_setopt(curl, CURLOPT_URL, *smtpURL);
         curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
-        curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_callback);
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, readCallback);
         curl_easy_setopt(curl, CURLOPT_READDATA, ftu);
         curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)file_info.st_size);
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
@@ -455,6 +444,6 @@ int main(int argc, char** argv) {
     // if (!result.empty()) {
     //     std::cout << "\033[31mNOT IMPLEMENTED | Value: " << result << "\033[0m" << std::endl;
     // }
-    curlSend("./mail.json", "", "", "");
+    curlSend("./mail.cpp", "", "", "", "");
     return EXIT_SUCCESS;
 }
